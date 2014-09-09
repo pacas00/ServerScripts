@@ -1,0 +1,281 @@
+#!/bin/bash
+# /etc/init.d/minecraft
+# version 1.0.4 2014-09-09 (YYYY-MM-DD)
+#
+#   Authors:    Nicholas Meredith   (udha)
+#               Peter Cashel        (pacas00)
+#
+
+### Setup cron
+#
+# sudo crontab -e
+#
+# m h dom mon dow command
+# 02 05 * * * /etc/init.d/minecraft backup
+# 00 05 * * * /etc/init.d/minecraft stop
+# 05 05 * * * /etc/init.d/minecraft start
+# */10 * * * * /etc/init.d/minecraft to-disk
+
+### SETTINGS
+
+# Name of server.jar file
+SERVICE='forge-1.7.10-10.13.0.1208-universal.jar'
+# User that should run the server
+USERNAME="pacas00"
+# Screen daemon name to use
+SCREENNAME=HTB3
+# Path to minecraft directory excluding the last ex: /home/v/mine
+MCPATH='/home/pacas00/HTB3/'
+CPU_COUNT=3
+MaxForgeRam=3072M
+MinForgeRam=256M
+MaxPermGenSize=256M
+# Change the values of -Xmx###M and -Xms###M to how mutch ram you want to give to the
+# server, remeber that the world will stored in you ram, so subtract your
+# world size from values.
+INVOCATION="java -server -Xmx$MaxForgeRam -Xms$MinForgeRam -XX:MaxPermSize=$MaxPermGenSize -XX:ParallelGCThreads=$CPU_COUNT -XX:NewRatio=3 -XX:SurvivorRatio=3 -XX:TargetSurvivorRatio=80 -XX:MaxTenuringThreshold=8 -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:MaxGCPauseMillis=10 -XX:GCPauseIntervalMillis=50 -XX:MaxGCMinorPauseMillis=7 -XX:+ExplicitGCInvokesConcurrent -XX:+UseCMSInitiatingOccupancyOnly -XX:CMSInitiatingOccupancyFraction=60 -XX:+BindGCTaskThreadsToCPUs -Xnoclassgc -jar $SERVICE nogui"
+# Where the world backups should go
+BACKUPPATH='/home/pacas00/minecraftbackup/'
+# Where the logs are copied when running log-roll
+LOGPATH="${MCPATH}/logs"
+# Where the world is located on the disk
+WORLDSTORAGE='/home/pacas00/HTB3/'
+#Path to the the mounted ramdisk default in ubuntu: /dev/shm
+RAMDISK='/dev/shm'
+
+ME=`whoami`
+as_user() {
+if [ $ME == $USERNAME ]; then
+	bash -c "$1"
+else
+	su - $USERNAME -c "$1"
+fi
+}
+
+mc_start() {
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+  then
+    echo "$SERVICE is already running!"
+  else
+    echo "Starting $SERVICE..."
+    cd $MCPATH
+    as_user "cd $MCPATH && screen -dmS $SCREENNAME $INVOCATION"
+    sleep 7
+fi
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+    then
+      echo "$SERVICE is now running."
+    else
+      echo "Error! Could not start $SERVICE!"
+    fi
+}
+
+mc_saveoff() {
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+then
+	echo "$SERVICE is running... suspending saves"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Minecraft: Starting full save to disk...\"\015'"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"save-off\"\015'"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"save-all\"\015'"
+	sync
+	sleep 10
+else
+	echo "$SERVICE was not running. Not suspending saves."
+fi
+}
+
+mc_saveon() {
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+then
+	echo "$SERVICE is running... re-enabling saves"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"save-on\"\015'"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Minecraft: Re-enabling save-on. \"\015'"
+else
+	echo "$SERVICE was not running. Not resuming saves."
+fi
+}
+
+mc_stop() {
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+  then
+    echo "Stopping $SERVICE"
+    as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER SHUTTING DOWN IN 10 SECONDS. Saving map...\"\015'"
+    as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"save-all\"\015'"
+    sleep 10
+    as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"stop\"\015'"
+    sleep 7
+  else
+    echo "$SERVICE was not running."
+  fi
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+  then
+    echo "Error! $SERVICE could not be stopped."
+  else
+    echo "$SERVICE is stopped."
+  fi
+}
+
+mc_forcestop() {
+    echo "Force Stopping Process";
+    kill -9 $minecraftpid
+}
+
+update() {
+	as_user /home/peter/minecraft/serverUpdate.sh
+}
+
+mc_world_backup() {
+	CURDATE=$(date '+%Y%m%d%H');
+	echo "Backing up minecraft worlds"
+	if [ -e $BACKUPPATH/world_$CURDATE.tar.bz2 ]
+	then
+		continue
+	else
+		as_user "cd $MCPATH && tar --exclude=dynmap/web/tiles/* -cjf $BACKUPPATH/serverBackup_$CURDATE.tar.bz2 $WORLDSTORAGE"
+		echo "Backed up world"
+		find $BACKUPPATH/* -mtime +14 -exec rm {} ;
+		echo "Cleaned up old backups"
+	fi
+}
+to_ram() {
+if [ -L $MCPATH/world ]
+then
+as_user "rsync -rvt $WORLDSTORAGE/ $RAMDISK/world"
+fi
+}
+to_disk() {
+as_user "rsync -rvt $MCPATH/world/ $WORLDSTORAGE"
+}
+get_pid() {
+minecraftpid=` ps -f -u $USERNAME | awk '/'"$SERVICE"'/ && !/dmS/ && /java/ {print$2 }'`
+}
+write_pid() {
+echo $minecraftpid > $MCPATH/pid.pid
+}
+read_pid() {
+if [ -f $MCPATH/pid.pid ];
+then
+minecraftpid=$(cat ${MCPATH}/pid.pid)
+fi
+}
+del_pid() {
+rm ${MCPATH}/pid.pid
+}
+
+case "$1" in
+start)
+# Starts the server
+#to_ram
+mc_start
+get_pid
+write_pid
+;;
+say)
+# Says something via init script
+SAYIT=$@
+echo $SAYIT | sed -e 's/^say/Server said:/g'
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"$SAYIT\"\015'"
+;;
+cmd)
+# Run a command via init script
+DOCMD=$@
+REALCMD=`echo $DOCMD | sed -e 's/^cmd //g'`
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"$REALCMD\"\015'"
+;;
+stop)
+# Stops the server
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER SHUTTING DOWN!\"\015'"
+mc_saveoff
+mc_saveon
+#to_disk
+mc_stop
+del_pid
+;;
+forcestop)
+# Kills the Process using the new PID
+#to_disk
+del_pid
+get_pid
+write_pid
+mc_forcestop
+del_pid
+;;
+update)
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER UPDATING!\"\015'"
+mc_saveoff
+mc_saveon
+#to_disk
+mc_stop
+del_pid
+update
+mc_start
+get_pid
+write_pid
+;;
+restart)
+# Restarts the server
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER REBOOT IN 10 SECONDS.\"\015'"
+mc_saveoff
+mc_saveon
+mc_stop
+del_pid
+mc_start
+get_pid
+write_pid
+;;
+pid)
+get_pid
+write_pid
+;;
+dynmap-fullrender-world)
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Starting dynmap full Render...\"\015'"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"dynmap fullrender world\"\015'"
+;;
+backup)
+	# Backups
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Minecraft: Starting backup routine...\"\015'"
+	mc_saveoff
+        as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"dynmap pause all\"\015'"
+	mc_world_backup
+	mc_saveon
+        as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"dynmap pause none\"\015'"
+	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Minecraft: Another backup completed successfully :)\"\015'"
+;;
+to-disk)
+# Writes from the ramdisk to disk, in case the server crashes.
+# Using ramdisk speeds things up alot, especially if you allow
+# teleportation on the server.
+#mc_saveoff
+#to_disk
+#mc_saveon
+;;
+connected)
+# Lists connected users
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff list\015'"
+sleep 3s
+tac $MCPATH/server.log | grep -m 1 "Connected"
+;;
+status)
+# Shows server status
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+then
+	echo "$SERVICE is running."
+else
+	echo "$SERVICE is not running."
+fi
+;;
+  command)
+    if [ $# -gt 1 ]; then
+      shift
+      mc_command "$*"
+    else
+      echo "Must specify server command (try 'help'?)"
+    fi
+    ;;
+*)
+	echo "Usage: /etc/init.d/minecraft {start|stop|forcestop|backup|log-roll|to-disk|pid|connected|status|restart}"
+	exit 1
+;;
+esac
+
+exit 0
