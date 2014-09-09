@@ -120,6 +120,10 @@ mc_forcestop() {
     kill -9 $minecraftpid
 }
 
+worldreset() {
+    rm -rf $MCPATH/world
+}
+
 update() {
 	as_user /home/peter/minecraft/serverUpdate.sh
 }
@@ -219,6 +223,18 @@ mc_saveoff
 mc_saveon
 mc_stop
 del_pid
+mc_start
+get_pid
+write_pid
+;;
+worldreset)
+# Regens the world from scratch
+as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER REBOOT IN 10 SECONDS.\"\015'"
+mc_saveoff
+mc_saveon
+mc_stop
+del_pid
+worldreset
 mc_start
 get_pid
 write_pid
