@@ -1,9 +1,9 @@
 #!/bin/bash
 # /etc/init.d/minecraft
-# version 1.0.4 2014-09-09 (YYYY-MM-DD)
+# version 1.0.5 2015-02-25 (YYYY-MM-DD)
 #
-#   Authors:    Nicholas Meredith   (udha)
-#               Peter Cashel        (pacas00)
+#   Authors:    Nicholas Meredith   (udha) # Core Script + extras
+#               Peter Cashel        (pacas00) # 
 #
 
 ### Setup cron
@@ -19,27 +19,27 @@
 ### SETTINGS
 
 # Name of server.jar file
-SERVICE='forge-1.7.10-10.13.0.1208-universal.jar'
+SERVICE='forge-1.7.10-10.13.2.1291-universal.jar'
 # User that should run the server
-USERNAME="pacas00"
+USERNAME="peter"
 # Screen daemon name to use
 SCREENNAME=HTB3
 # Path to minecraft directory excluding the last ex: /home/v/mine
-MCPATH='/home/pacas00/HTB3/'
-CPU_COUNT=3
-MaxForgeRam=3072M
+MCPATH='/home/peter/HTB3/'
+CPU_COUNT=6 #-XX:ParallelGCThreads=$CPU_COUNT 
+MaxForgeRam=4096M
 MinForgeRam=256M
 MaxPermGenSize=256M
 # Change the values of -Xmx###M and -Xms###M to how mutch ram you want to give to the
 # server, remeber that the world will stored in you ram, so subtract your
 # world size from values.
-INVOCATION="java -server -Xmx$MaxForgeRam -Xms$MinForgeRam -XX:MaxPermSize=$MaxPermGenSize -XX:ParallelGCThreads=$CPU_COUNT -XX:NewRatio=3 -XX:SurvivorRatio=3 -XX:TargetSurvivorRatio=80 -XX:MaxTenuringThreshold=8 -XX:+UseParNewGC -XX:+UseConcMarkSweepGC -XX:MaxGCPauseMillis=10 -XX:GCPauseIntervalMillis=50 -XX:MaxGCMinorPauseMillis=7 -XX:+ExplicitGCInvokesConcurrent -XX:+UseCMSInitiatingOccupancyOnly -XX:CMSInitiatingOccupancyFraction=60 -XX:+BindGCTaskThreadsToCPUs -Xnoclassgc -jar $SERVICE nogui"
+INVOCATION="java -d64 -XX:+UseCompressedOops -server -Xmx$MaxForgeRam -Xms$MinForgeRam -XX:MaxPermSize=$MaxPermGenSize -XX:+ExplicitGCInvokesConcurrent -XX:+BindGCTaskThreadsToCPUs -Xnoclassgc -Xincgc -Djline.terminal=jline.UnsupportedTerminal -XX:UseSSE=4 -XX:+UseConcMarkSweepGC -XX:+UseCMSCompactAtFullCollection -XX:+UseParNewGC -XX:+DisableExplicitGC -XX:+AggressiveOpts -jar $SERVICE nogui"
 # Where the world backups should go
 BACKUPPATH='/home/pacas00/minecraftbackup/'
 # Where the logs are copied when running log-roll
 LOGPATH="${MCPATH}/logs"
 # Where the world is located on the disk
-WORLDSTORAGE='/home/pacas00/HTB3/'
+WORLDSTORAGE='/home/peter/HTB3/'
 #Path to the the mounted ramdisk default in ubuntu: /dev/shm
 RAMDISK='/dev/shm'
 
@@ -124,7 +124,7 @@ worldreset() {
     rm -rf $MCPATH/world
 }
 
-update() {
+update() { #Being replaced with advanced module
 	as_user /home/peter/minecraft/serverUpdate.sh
 }
 
@@ -227,6 +227,7 @@ mc_start
 get_pid
 write_pid
 ;;
+
 worldreset)
 # Regens the world from scratch
 as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say SERVER REBOOT IN 10 SECONDS.\"\015'"
@@ -242,6 +243,18 @@ write_pid
 pid)
 get_pid
 write_pid
+;;
+watchdog)
+if ps ax | grep -v grep | grep -v -i SCREEN | grep $SERVICE > /dev/null
+then
+        echo "$SERVICE is running."
+else
+        if [ ! -f $MCPATH/updating ];
+        then
+                echo "$SERVICE is being started again."
+                mc_start
+        fi
+fi
 ;;
 dynmap-fullrender-world)
 	as_user "screen -p 0 -S $SCREENNAME -X eval 'stuff \"say Starting dynmap full Render...\"\015'"
